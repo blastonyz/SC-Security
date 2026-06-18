@@ -1,0 +1,11 @@
+{
+  "remappings": [
+    "@openzeppelin/contracts=lib/openzeppelin-contracts/contracts"
+  ],
+  "outputSelection": {
+    "*": {
+      "*": ["evm.bytecode", "evm.deployedBytecode"],
+      "": ["ast"]
+    }
+  }
+}
