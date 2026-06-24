@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.6;
+pragma solidity 0.7.6;
 pragma experimental ABIEncoderV2;
 
 import {Test, console} from "forge-std/Test.sol";
@@ -245,7 +245,15 @@ contract PuppyRaffleTest is Test {
         console.log("Ending attacker contract balance: ", address(reentrancyAttacker).balance);
         console.log("Ending contract balance: ", address(puppyRaffle).balance);
 
+    }
 
+    function test_cantSendMoneyToRaffle() public {
+        address user = makeAddr("user");
+        vm.deal(user, 1 ether);
+        vm.expectRevert();
+        vm.prank(user);
+        (bool success,) = address(puppyRaffle).call{value: 1 ether}("");
+        require(success, "Failed to send money to raffle");
     }
 }
 

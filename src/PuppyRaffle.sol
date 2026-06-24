@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.7.6;
-
+pragma solidity 0.7.6;
+//@audit-info floating pragma is not recomended
+//@audit-info use a stable solidity version, 0.7.. is too old
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
@@ -62,6 +63,7 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @param _raffleDuration the duration in seconds of the raffle
     constructor(uint256 _entranceFee, address _feeAddress, uint256 _raffleDuration) ERC721("Puppy Raffle", "PR") {
         entranceFee = _entranceFee;
+        //@audit-info check for the address(0)
         feeAddress = _feeAddress;
         raffleDuration = _raffleDuration;
         raffleStartTime = block.timestamp;
@@ -83,10 +85,12 @@ contract PuppyRaffle is ERC721, Ownable {
     // @audit DoS vulnerability when the number of players is growing up
     function enterRaffle(address[] memory newPlayers) public payable {
         require(msg.value == entranceFee * newPlayers.length, "PuppyRaffle: Must send enough to enter raffle");
+        //@audit-gas uint256 playerLength = newPlayers.length;
         for (uint256 i = 0; i < newPlayers.length; i++) {
             players.push(newPlayers[i]);
         }
         //@q is necessary check for duplicates?
+        //@audit-gas uint256 playerLength = players.length preventing double gas spend
         // Check for duplicates
         for (uint256 i = 0; i < players.length - 1; i++) {
             for (uint256 j = i + 1; j < players.length; j++) {
@@ -100,10 +104,11 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev This function will allow there to be blank spots in the array
     //  @audit Reentrancy vulnerability detected with slither . Apply CEI pattern to prevent it
     function refund(uint256 playerIndex) public {
+        //@audit MEV
         address playerAddress = players[playerIndex];
         require(playerAddress == msg.sender, "PuppyRaffle: Only the player can refund");
         require(playerAddress != address(0), "PuppyRaffle: Player already refunded, or is not active");
-
+        //@audit Reentrancy vulnerability detected with slither . Apply CEI pattern to prevent it
         payable(msg.sender).sendValue(entranceFee);
 
         players[playerIndex] = address(0);
@@ -113,12 +118,15 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @notice a way to get the index in the array
     /// @param player the address of a player in the raffle
     /// @return the index of the player in the array, if they are not active, it returns 0
+    //  @audit DoS vulnerability
+    //  @audit is this used anywhere?
     function getActivePlayerIndex(address player) external view returns (uint256) {
         for (uint256 i = 0; i < players.length; i++) {
             if (players[i] == player) {
                 return i;
             }
         }
+        //@audit what happend with the player in index 0? if he is not active, the function will return 0, but if he is active, the function will also return 0. So we can not know if the player in index 0 is active or not. We can solve this problem by adding a require statement to check if the player in index 0 is the player we are looking for, if it is not, then we can return 0.
         return 0;
     }
 
@@ -129,19 +137,30 @@ contract PuppyRaffle is ERC721, Ownable {
     /// @dev we reset the active players array after the winner is selected
     /// @dev we send 80% of the funds to the winner, the other 20% goes to the feeAddress
     function selectWinner() external {
+
+        //q does this follow CEI?
+        //q what are correct values for raffleStartTime and raffleDuration? 
         require(block.timestamp >= raffleStartTime + raffleDuration, "PuppyRaffle: Raffle not over");
         require(players.length >= 4, "PuppyRaffle: Need at least 4 players");
+        // @audit Weak randomness, use VRF or Commit Reveal scheme to generate random numbers
         uint256 winnerIndex =
             uint256(keccak256(abi.encodePacked(msg.sender, block.timestamp, block.difficulty))) % players.length;
         address winner = players[winnerIndex];
+        // q why not address(this).balance?
         uint256 totalAmountCollected = players.length * entranceFee;
+        //q is the 80% correct? 20% for fees 
         uint256 prizePool = (totalAmountCollected * 80) / 100;
         uint256 fee = (totalAmountCollected * 20) / 100;
+        //@q what is this? totalFees the owner should be able to collect
+        //@audit Overflow
+        //fixes: newer version of solc, or use a bigger uint
+        //max: 18.446744073709551615 [19decimals]
         totalFees = totalFees + uint64(fee);
-
+        //q where is the increment?
         uint256 tokenId = totalSupply();
 
         // We use a different RNG calculate from the winnerIndex to determine rarity
+        //@audit Weak randomness, use VRF or Commit Reveal scheme to generate random numbers
         uint256 rarity = uint256(keccak256(abi.encodePacked(msg.sender, block.difficulty))) % 100;
         if (rarity <= COMMON_RARITY) {
             tokenIdToRarity[tokenId] = COMMON_RARITY;
@@ -151,11 +170,13 @@ contract PuppyRaffle is ERC721, Ownable {
             tokenIdToRarity[tokenId] = LEGENDARY_RARITY;
         }
 
-        delete players;
+        delete players;// e reset the players array for the next raffle
         raffleStartTime = block.timestamp;
-        previousWinner = winner;
+        previousWinner = winner;// q  Does it really mathers?
+        //@audit Reentrancy vulnerability
         (bool success,) = winner.call{value: prizePool}("");
         require(success, "PuppyRaffle: Failed to send prize pool to winner");
+        //fixes: apply CEI pattern to prevent reentrancy
         _safeMint(winner, tokenId);
     }
 
